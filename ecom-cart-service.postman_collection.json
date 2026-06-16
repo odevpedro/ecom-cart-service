@@ -1,0 +1,83 @@
+{
+  "info": {
+    "name": "ecom-cart-service",
+    "description": "API de carrinho de compras\n\nBase URL: {{base_url}}",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "ecom-cart"
+  },
+  "item": [
+    {
+      "name": "Ver carrinho",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/cart/{{user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "cart", "{{user_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Adicionar item",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    var json = pm.response.json();",
+              "    if (json.items && json.items.length > 0) {",
+              "        pm.collectionVariables.set('item_id', json.items[0].id);",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"productId\": \"stub-product-id\",\n  \"sku\": \"STUB-SKU\",\n  \"quantity\": 2\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/cart/{{user_id}}/items",
+          "host": ["{{base_url}}"],
+          "path": ["api", "cart", "{{user_id}}", "items"]
+        }
+      }
+    },
+    {
+      "name": "Remover item",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/cart/{{user_id}}/items/{{item_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "cart", "{{user_id}}", "items", "{{item_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Limpar carrinho",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/cart/{{user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "cart", "{{user_id}}"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3002", "type": "string" },
+    { "key": "user_id", "value": "stub-user-id", "type": "string" },
+    { "key": "item_id", "value": "", "type": "string" }
+  ]
+}
