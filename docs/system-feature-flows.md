@@ -11,6 +11,7 @@
 - [Convencoes deste Documento](#convencoes-deste-documento)
 - [Feature: Gerenciamento de Carrinho](#feature-gerenciamento-de-carrinho)
 - [Feature: Validacao Externa](#feature-validacao-externa)
+- [Feature: Migracao para PostgreSQL](#feature-migracao-para-postgresql)
 
 ---
 
@@ -27,7 +28,8 @@ HTTP Request
     └── Routes (roteamento)
             └── Controller (validacao leve + delegacao)
                     └── Service (logica de negocio + integracoes)
-                            ├── In-memory Map (storage atual)
+                            ├── PostgreSQL via Sequelize (storage principal)
+                            ├── In-memory Map (fallback quando sem banco)
                             └── HTTP Clients (Product Catalog + User)
 ```
 
@@ -54,8 +56,9 @@ HTTP Request
 
 # Feature: Gerenciamento de Carrinho
 
-> **Versao:** 1.0.0
+> **Versao:** 1.1.0
 > **Implementada em:** 2026-06-01
+> **Atualizada em:** 2026-06-17
 > **Status:** Concluida
 
 ---
@@ -65,7 +68,7 @@ HTTP Request
 Permite que usuarios gerenciem seu carrinho de compras ativo: adicionar produtos, remover itens, visualizar o conteudo e limpar o carrinho por completo. Cada usuario possui exatamente um carrinho ativo.
 
 **Motivacao:** Necessidade de um carrinho de compras stateful por cliente, integrado ao ecossistema de microservicos de e-commerce.
-**Resultado:** API REST funcional com 4 endpoints de carrinho, armazenamento em memoria e validacao externa de produtos e usuarios.
+**Resultado:** API REST funcional com 4 endpoints de carrinho, armazenamento em PostgreSQL com fallback para memoria e validacao externa de produtos e usuarios.
 
 ---
 
@@ -116,11 +119,12 @@ O controller instancia `CartService` e delega cada operacao:
 
 | Regra | Descricao | Localizacao no Codigo |
 |-------|-----------|----------------------|
-| Um carrinho por usuario | A chave do Map e `cart:{userId}` | `src/services/cart.service.js:13` |
-| Incremento de quantidade | Se o produto ja existe no carrinho, incrementa a quantidade em vez de duplicar | `src/services/cart.service.js:34-36` |
-| Calculo de total | `totalCents` e sempre recalculado como soma de `unitPriceCents * quantity` | `src/services/cart.service.js:49` |
-| Remocao de item | Remove o item do array pelo `productId`, nao pelo `id` interno | `src/services/cart.service.js:60` |
-| Limpeza de carrinho | Remove a chave do `Map` e retorna carrinho vazio | `src/services/cart.service.js:68-69` |
+| Um carrinho por usuario | `userId` e UNIQUE na tabela `carts` | `src/models/cart.model.js:12-16` |
+| Incremento de quantidade | Se o produto ja existe no carrinho, incrementa a quantidade em vez de duplicar | `src/services/cart.service.js:62-64` (in-memory), `src/services/cart.service.js:131-134` (DB) |
+| Decremento ao remover | `removeItem` decrementa quantity se > 1, remove o item se == 1 | `src/services/cart.service.js:78-83` (in-memory), `src/services/cart.service.js:153-158` (DB) |
+| Calculo de total | `totalCents` e sempre recalculado como soma de `unitPriceCents * quantity` | `src/services/cart.service.js:70-72` (in-memory), `src/services/cart.service.js:141-144` (DB) |
+| Remocao de item | Remove o item pelo `productId` do catalogo, nao pelo `id` interno | `src/services/cart.service.js:81` (in-memory), `src/services/cart.service.js:156` (DB) |
+| Limpeza de carrinho | Deleta todos os `CartItem` do carrinho e zera o total | `src/services/cart.service.js:88-90` (in-memory), `src/services/cart.service.js:167-173` (DB) |
 
 ---
 
@@ -130,7 +134,10 @@ O controller instancia `CartService` e delega cada operacao:
 
 | Repository | Operacao | Arquivo |
 |------------|----------|---------|
-| `Map<string, Cart>` (in-memory) | get/set/delete | `src/services/cart.service.js:7` |
+| `PostgreSQL (Sequelize)` | findOrCreate / findAll / save / destroy | `src/services/cart.service.js` (metodos `_*Db`) |
+| `Map<string, Cart>` (in-memory) | get/set/delete | `src/services/cart.service.js` (metodos `_*InMemory`) |
+
+A escolha entre os dois e feita na inicializacao do servico: se `DATABASE_URL` estiver configurada e a conexao com PostgreSQL for bem-sucedida, usa Sequelize. Caso contrario, usa `Map` em memoria.
 
 **Integracoes externas:**
 
@@ -199,7 +206,7 @@ O controller instancia `CartService` e delega cada operacao:
 
 ## Diagrama de Sequencia
 
-### Adicionar Item ao Carrinho
+### Adicionar Item ao Carrinho (modo PostgreSQL)
 
 ```mermaid
 sequenceDiagram
@@ -208,7 +215,7 @@ sequenceDiagram
     participant Service as CartService
     participant UserClient as UserClient
     participant ProductClient as ProductCatalogClient
-    participant Store as In-Memory Map
+    participant DB as PostgreSQL (Sequelize)
 
     Client->>Controller: POST /api/cart/:userId/items
     Controller->>Controller: Extrai userId, productId, sku, quantity
@@ -233,17 +240,26 @@ sequenceDiagram
         Controller-->>Client: 404 { error: { code: 'PRODUCT_NOT_FOUND' } }
     end
 
-    Service->>Store: store.get(cart:{userId})
-    Store-->>Service: cart | undefined
+    Service->>DB: Cart.findOrCreate({ where: { userId } })
+    DB-->>Service: cart
 
-    alt Item ja existe no carrinho
-        Service->>Service: incrementa quantity
+    Service->>DB: CartItem.findOne({ where: { cartId, productId } })
+    DB-->>Service: item | null
+
+    alt Item ja existe
+        Service->>DB: item.quantity += quantity; item.save()
     else
-        Service->>Service: cria novo CartItem com uuid()
+        Service->>DB: CartItem.create({ cartId, productId, ... })
     end
 
+    Service->>DB: CartItem.findAll({ where: { cartId } })
+    DB-->>Service: items
+
     Service->>Service: recalcula totalCents
-    Service->>Store: store.set(cart:{userId}, cart)
+    Service->>DB: cart.save()
+
+    Service->>DB: Cart.findOne({ where: { userId }, include: [items] })
+    DB-->>Service: cart completo
 
     Service-->>Controller: cart atualizado
     Controller-->>Client: 200 { userId, items, totalCents }
@@ -253,15 +269,15 @@ sequenceDiagram
 
 ## Decisoes Tecnicas
 
-### ADR-001 — Armazenamento em Map em memoria
+### ADR-001 — Armazenamento em PostgreSQL com fallback in-memory
 
 | Campo | Detalhe |
 |-------|---------|
-| **Status** | Aceita (migrando para PostgreSQL) |
-| **Data** | 2026-06-01 |
-| **Contexto** | Prototipo rapido sem dependencia de banco de dados. |
-| **Decisao** | `Map<string, Cart>` com chave `cart:{userId}`. |
-| **Consequencias** | Dados volateis, mas estrutura de dados espelha o schema SQL final, facilitando migracao. |
+| **Status** | Concluida |
+| **Data** | 2026-06-17 |
+| **Contexto** | Necessidade de persistencia com capacidade de operar sem banco de dados (desenvolvimento / fallback). |
+| **Decisao** | Usar PostgreSQL via Sequelize como storage principal. Se `DATABASE_URL` nao estiver configurada ou a conexao falhar, usar `Map<string, Cart>` em memoria como fallback. |
+| **Consequencias** | Dois codigos de acesso a dados mantidos em paralelo. Testes usam modo in-memory mockando `../database`. |
 
 ---
 
@@ -352,3 +368,112 @@ O diagrama de sequencia para o fluxo completo de `addItem` (incluindo as validac
 | **Contexto** | Servicos externos podem estar temporariamente indisponiveis (rede, restart, deployment). |
 | **Decisao** | Capturar excecoes com `catch` vazio e retornar valor sentinela (`null` / `false`) em vez de propagar o erro. |
 | **Consequencias** | Falhas transientes sao tratadas como "recurso nao encontrado". Nao ha distincao entre "servico fora do ar" e "recurso inexistente" — ambos resultam em 404. |
+
+---
+
+---
+
+# Feature: Migracao para PostgreSQL
+
+> **Versao:** 1.1.0
+> **Implementada em:** 2026-06-17
+> **Status:** Concluida
+
+---
+
+## Resumo
+
+Migracao do armazenamento de dados de `Map` em memoria para PostgreSQL usando Sequelize ORM, com estrategia de fallback graceful para modo in-memory quando o banco nao esta disponivel.
+
+**Motivacao:** Dados de carrinho precisam persistir entre reinicializacoes do servico em ambiente de producao.
+**Resultado:** Servico opera com PostgreSQL quando disponivel, com fallback automatico para `Map` em memoria.
+
+---
+
+## Fluxo de Inicializacao
+
+### 1. Configuracao da Conexao
+
+- **Arquivo:** `src/database/index.js`
+- **Trigger:** Leitura da variavel `DATABASE_URL` em `src/config/index.js`
+- **Fluxo:**
+  1. Se `DATABASE_URL` nao estiver definida → `sequelize = null` (modo in-memory)
+  2. Se `DATABASE_URL` estiver definida → tenta criar conexao Sequelize
+  3. Se a conexao falhar → loga warning e define `sequelize = null` (fallback in-memory)
+  4. Se a conexao for bem-sucedida → define modelos `Cart` e `CartItem` no Sequelize
+
+### 2. Sincronizacao no Startup
+
+- **Arquivo:** `src/app.js`
+- **Trigger:** `db.sequelize.sync()` chamado na carga do modulo
+- **Comportamento:** Cria as tabelas se nao existirem (apenas desenvolvimento)
+
+### 3. Modelos
+
+- **Arquivo:** `src/models/cart.model.js`
+- Duas entidades definidas com `sequelize.define`:
+  - `Cart` (tabela `carts`)
+  - `CartItem` (tabela `cart_items`)
+- Relacionamento: `Cart.hasMany(CartItem)` e `CartItem.belongsTo(Cart)` via `cartId`
+
+### 4. Migrations
+
+- **Arquivo:** `src/database/migrations/20260616-create-carts.js`
+- Criacao das tabelas `carts` e `cart_items` com types e constraints
+
+---
+
+## Estrategia de Fallback
+
+```javascript
+// src/database/index.js — logica de fallback
+if (config.databaseUrl) {
+  try {
+    sequelize = new Sequelize(config.databaseUrl, { dialect: 'postgres', logging: false });
+    // define models...
+  } catch (err) {
+    sequelize = null; // fallback para in-memory
+  }
+}
+```
+
+No `CartService`, a flag `this.useDb` determina qual conjunto de metodos sera chamado:
+
+| Modo | Metodos | Storage |
+|------|---------|---------|
+| DB (`useDb: true`) | `_getCartDb`, `_addItemDb`, `_removeItemDb`, `_clearCartDb` | PostgreSQL via Sequelize |
+| In-memory (`useDb: false`) | `_getCartInMemory`, `_addItemInMemory`, `_removeItemInMemory`, `_clearCartInMemory` | `Map<string, Cart>` |
+
+---
+
+## Mudancas na Estrutura de Dados
+
+| Aspecto | Antes (Map) | Depois (PostgreSQL) |
+|---------|-------------|---------------------|
+| PK de `Cart` | `userId` (string) | `id` (UUID) + `userId` UNIQUE |
+| Armazenamento de itens | Array embutido no objeto `Cart` | Tabela separada `cart_items` com FK |
+| `removeItem` | Remove item independente da quantidade | Decrementa quantity se > 1, remove se == 1 |
+| Criacao de carrinho | Implicita ao primeiro `addItem` | `findOrCreate` no banco |
+| Persistencia | Volatil (reinicio perde dados) | Permanente |
+
+---
+
+## Testes
+
+- **Arquivo:** `src/services/cart.service.test.js`
+- **Estrategia:** Mock do modulo `../database` retornando `{ sequelize: null, Cart: null, CartItem: null }` para forcar modo in-memory
+- **Cobertura:** 21 cenarios abrangendo get, add, remove, clear, validacoes, calculo de total e isolamento de carrinhos
+
+---
+
+## Decisoes Tecnicas
+
+### ADR-003 — Strategy Pattern para DB vs In-memory
+
+| Campo | Detalhe |
+|-------|---------|
+| **Status** | Aceita |
+| **Data** | 2026-06-17 |
+| **Contexto** | Necessario suportar dois modos de armazenamento sem alterar a interface publica do servico. |
+| **Decisao** | Usar uma flag `useDb` no construtor do `CartService` que redireciona para metodos privados especificos (`_*Db` ou `_*InMemory`). |
+| **Consequencias** | Manutencao de duas implementacoes paralelas, mas a interface publica permanece inalterada. Testes mockam o modulo `../database` para forçar modo in-memory. |

@@ -94,10 +94,10 @@ A API estará disponível em `http://localhost:3002`.
 npm test
 ```
 
-**7 cenários:**
+**23 cenários:**
 | Suite                       | Arquivo                         | Cenários |
 |-----------------------------|---------------------------------|----------|
-| Unitários (cart service)    | `services/cart.service.test.js` | 7        |
+| Unitários (cart service)    | `services/cart.service.test.js` | 23       |
 
 ---
 

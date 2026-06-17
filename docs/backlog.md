@@ -34,8 +34,6 @@ API REST responsavel pelo gerenciamento do carrinho de compras ativo de cada cli
 
 > Features atualmente sendo desenvolvidas. Idealmente, maximo de 2–3 itens simultaneos.
 
-- [~] `P1` `M` **Migracao de Map em memoria para PostgreSQL** — Substituir o armazenamento em `Map` por tabelas no PostgreSQL usando Sequelize, mantendo compatibilidade com a API existente.
-
 ---
 
 ## Pendentes
@@ -55,6 +53,7 @@ API REST responsavel pelo gerenciamento do carrinho de compras ativo de cada cli
 - [x] `P0` `S` **Clientes HTTP com fallback** — ProductCatalogClient e UserClient com timeout de 5s e retorno null/false em caso de falha — 2026-06-01
 - [x] `P1` `XS` **Health checks + Request ID** — Endpoints `/health`, `/live`, `/ready` e middleware `X-Request-ID` — 2026-06-01
 - [x] `P2` `XS` **Swagger UI** — Documentacao interativa disponivel em `/docs` — 2026-06-01
+- [x] `P1` `M` **Migracao de Map em memoria para PostgreSQL** — Substituir o armazenamento em `Map` por tabelas no PostgreSQL usando Sequelize, mantendo compatibilidade com a API existente — 2026-06-17
 
 ---
 

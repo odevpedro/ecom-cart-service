@@ -4,6 +4,7 @@ const requestId = require('./middleware/response');
 const errorHandler = require('./middleware/error-handler');
 const cartRoutes = require('./routes/cart.routes');
 const swaggerSpec = require('./config/swagger');
+const db = require('./database');
 
 const app = express();
 
@@ -18,5 +19,12 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use('/api/cart', cartRoutes);
 app.use(errorHandler);
+
+if (db.sequelize) {
+  db.sequelize
+    .sync()
+    .then(() => console.log('Database synced'))
+    .catch((err) => console.warn('Database sync failed:', err.message));
+}
 
 module.exports = app;

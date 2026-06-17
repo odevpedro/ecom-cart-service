@@ -1,7 +1,7 @@
 # Data Model — Cart Service
 
 > Documento vivo do modelo de dados. Atualizado sempre que uma entidade for criada, alterada ou removida.
-> **Ultima atualizacao:** 2026-06-16
+> **Ultima atualizacao:** 2026-06-17
 
 ---
 
@@ -18,9 +18,9 @@
 
 ## Visao Geral
 
-Modelo de dados centrado em uma unica entidade — `Cart` — que representa o carrinho de compras ativo de um cliente. O carrinho contem uma lista de itens embutidos (`CartItem[]`) e o total em centavos. Atualmente armazenado em `Map` na memoria, com migracao em andamento para PostgreSQL.
+Modelo de dados centrado em duas entidades relacionadas — `Cart` e `CartItem` — que representam o carrinho de compras ativo de um cliente. Armazenado em PostgreSQL via Sequelize ORM, com fallback para `Map` em memoria quando o banco nao esta disponivel.
 
-**Banco de dados:** PostgreSQL 15 (em migracao — atualmente in-memory `Map`)
+**Banco de dados:** PostgreSQL 15
 **ORM / acesso:** Sequelize 6
 **Extensoes relevantes:** N/A (schemas simples, sem extensoes especiais)
 
@@ -31,26 +31,28 @@ Modelo de dados centrado em uma unica entidade — `Cart` — que representa o c
 ```mermaid
 erDiagram
     CART {
-        string userId PK
+        uuid id PK
+        string userId UK
         int totalCents
-        datetime created_at
-        datetime updated_at
+        datetime createdAt
+        datetime updatedAt
     }
 
     CART_ITEM {
         uuid id PK
+        uuid cartId FK
         string productId
         string sku
         string name
         int unitPriceCents
         int quantity
         string imageUrl
+        datetime createdAt
+        datetime updatedAt
     }
 
     CART ||--o{ CART_ITEM : "contem"
 ```
-
-> Nota: `CartItem` e uma entidade embutida — atualmente armazenada como array dentro do `Cart` no `Map`. Na migracao para PostgreSQL, passara a ser uma tabela separada com chave estrangeira para `Cart`.
 
 ---
 
@@ -67,45 +69,47 @@ erDiagram
 
 | Campo | Tipo SQL | Nullable | Default | Descricao |
 |-------|----------|----------|---------|-----------|
-| `user_id` | VARCHAR(255) | Nao | — | Identificador do usuario (PK) |
-| `total_cents` | INTEGER | Nao | 0 | Soma de `unitPriceCents * quantity` de todos os itens |
-| `created_at` | TIMESTAMPTZ | Nao | NOW() | Data de criacao |
-| `updated_at` | TIMESTAMPTZ | Nao | NOW() | Data da ultima atualizacao |
+| `id` | UUID | Nao | uuid_generate_v4() | Identificador unico do carrinho (PK) |
+| `userId` | VARCHAR(255) | Nao | — | Identificador do usuario (UK) |
+| `totalCents` | INTEGER | Nao | 0 | Soma de `unitPriceCents * quantity` de todos os itens |
+| `createdAt` | TIMESTAMPTZ | Nao | NOW() | Data de criacao |
+| `updatedAt` | TIMESTAMPTZ | Nao | NOW() | Data da ultima atualizacao |
 
 **Constraints:**
-- `PRIMARY KEY (user_id)`
+- `PRIMARY KEY (id)`
+- `UNIQUE (userId)`
 
 **Relacionamentos:**
-- Um `Cart` tem muitos `CartItem` via `cart_items.cart_user_id`
+- Um `Cart` tem muitos `CartItem` via `cart_items.cartId`
 
 ---
 
-### CartItem (entidade embutida)
+### CartItem
 
 > Item individual dentro de um carrinho. Representa um produto com quantidade, precos e metadados visuais.
 
-**Tabela:** `cart_items` (prevista na migracao para PostgreSQL)
+**Tabela:** `cart_items`
 **Servico responsavel:** Cart Service
 
 | Campo | Tipo SQL | Nullable | Default | Descricao |
 |-------|----------|----------|---------|-----------|
-| `id` | UUID | Nao | uuid_generate_v4() | Identificador unico do item |
-| `cart_user_id` | VARCHAR(255) | Nao | — | Chave estrangeira para `carts.user_id` |
-| `product_id` | VARCHAR(255) | Nao | — | ID do produto no Catalog Service |
-| `sku` | VARCHAR(100) | Nao | — | SKU do produto |
-| `name` | VARCHAR(255) | Nao | — | Nome do produto (cache do catalog) |
-| `unit_price_cents` | INTEGER | Nao | — | Preco unitario em centavos no momento da adicao |
+| `id` | UUID | Nao | uuid_generate_v4() | Identificador unico do item (PK) |
+| `cartId` | UUID | Nao | — | Chave estrangeira para `carts.id` |
+| `productId` | VARCHAR(255) | Nao | — | ID do produto no Catalog Service |
+| `sku` | VARCHAR(100) | Sim | — | SKU do produto |
+| `name` | VARCHAR(255) | Sim | — | Nome do produto (cache do catalog) |
+| `unitPriceCents` | INTEGER | Sim | — | Preco unitario em centavos no momento da adicao |
 | `quantity` | INTEGER | Nao | 1 | Quantidade do produto |
-| `image_url` | TEXT | Sim | NULL | URL da imagem do produto |
-| `created_at` | TIMESTAMPTZ | Nao | NOW() | Data de criacao |
-| `updated_at` | TIMESTAMPTZ | Nao | NOW() | Data da ultima atualizacao |
+| `imageUrl` | TEXT | Sim | NULL | URL da imagem do produto |
+| `createdAt` | TIMESTAMPTZ | Nao | NOW() | Data de criacao |
+| `updatedAt` | TIMESTAMPTZ | Nao | NOW() | Data da ultima atualizacao |
 
 **Constraints:**
 - `PRIMARY KEY (id)`
-- `FOREIGN KEY (cart_user_id) REFERENCES carts(user_id) ON DELETE CASCADE`
+- `FOREIGN KEY (cartId) REFERENCES carts(id) ON DELETE CASCADE`
 
 **Relacionamentos:**
-- Muitos `CartItem` pertencem a um `Cart` via `cart_items.cart_user_id`
+- Muitos `CartItem` pertencem a um `Cart` via `cart_items.cartId`
 
 ---
 
@@ -119,8 +123,10 @@ N/A — O dominio do Cart Service nao possui enums. `quantity` deve ser sempre m
 
 | Indice | Tabela | Campos | Tipo | Motivo |
 |--------|--------|--------|------|--------|
-| `idx_cart_user_id` | `carts` | `user_id` | BTREE (PK) | Busca de carrinho por usuario |
-| `idx_cart_items_cart` | `cart_items` | `cart_user_id` | BTREE | FK lookup ao carregar itens de um carrinho |
+| `carts_pkey` | `carts` | `id` | BTREE (PK) | Identificacao unica do carrinho |
+| `carts_user_id_key` | `carts` | `userId` | BTREE (UK) | Busca de carrinho por usuario |
+| `cart_items_pkey` | `cart_items` | `id` | BTREE (PK) | Identificacao unica do item |
+| `idx_cart_items_cart` | `cart_items` | `cartId` | BTREE | FK lookup ao carregar itens de um carrinho |
 
 ---
 
@@ -130,7 +136,7 @@ N/A — O dominio do Cart Service nao possui enums. `quantity` deve ser sempre m
 
 | Campo | Tabela | Classificacao | Justificativa |
 |-------|--------|---------------|---------------|
-| `user_id` | `carts` | Pessoal | Identificador direto do usuario |
+| `userId` | `carts` | Pessoal | Identificador direto do usuario |
 | `name` | `cart_items` | Publico derivado | Dado de produto replicado |
 
 **Regras gerais:**
@@ -141,24 +147,34 @@ N/A — O dominio do Cart Service nao possui enums. `quantity` deve ser sempre m
 
 ## Decisoes de Modelagem
 
-### ADR-DM-001 — Armazenamento em memoria com migracao para PostgreSQL
+### ADR-DM-001 — Migracao de Map em memoria para PostgreSQL com Sequelize
 
 | Campo | Detalhe |
 |-------|---------|
-| **Status** | Aceita |
-| **Data** | 2026-06-01 |
-| **Contexto** | Necessidade de prototipar o servico rapidamente sem configurar banco de dados. |
-| **Decisao** | Utilizar `Map<string, Cart>` em memoria como storage inicial, com estrutura de dados que espelha o schema PostgreSQL planejado. |
-| **Alternativas consideradas** | SQLite (descartado por ser diferente do banco de producao), iniciar direto com PostgreSQL (descartado por complexidade inicial). |
-| **Consequencias** | Dados sao perdidos ao reiniciar o servico. Codigo do servico precisara de adaptacao para usar Sequelize. |
+| **Status** | Concluida |
+| **Data** | 2026-06-17 |
+| **Contexto** | Prototipo inicial usava `Map<string, Cart>` em memoria, mas dados sao perdidos ao reiniciar o servico. Necessario armazenamento persistente para ambiente de producao. |
+| **Decisao** | Substituir `Map` por PostgreSQL com Sequelize ORM. Estrategia de fallback: se `DATABASE_URL` nao estiver configurada ou a conexao falhar, o servico opera em modo in-memory. |
+| **Alternativas consideradas** | Manter apenas `Map` (descartado por falta de persistencia), usar Redis como unico storage (descartado por complexidade de consultas). |
+| **Consequencias** | Dados persistem entre restart. Codigo do servico foi adaptado para usar Sequelize com strategy pattern (DB ou in-memory). |
 
-### ADR-DM-002 — CartItem como entidade embutida (array)
+### ADR-DM-002 — CartItem como tabela separada com FK para Cart
 
 | Campo | Detalhe |
 |-------|---------|
-| **Status** | Aceita |
-| **Data** | 2026-06-01 |
-| **Contexto** | No storage em memoria, itens do carrinho sao armazenados como array dentro do objeto `Cart`. |
-| **Decisao** | Manter `CartItem` como sub-entidade embutida no `Cart` enquanto o storage for `Map`. Na migracao para PostgreSQL, `CartItem` passara a ser uma tabela separada com FK para `Cart`. |
-| **Alternativas consideradas** | Tabela separada desde o inicio (inviavel com `Map`). |
-| **Consequencias** | Mudanca de paradigma de acesso a dados durante a migracao: de `cart.items.find(...)` para `CartItem.findAll({ where: { cartUserId } })`. |
+| **Status** | Concluida |
+| **Data** | 2026-06-17 |
+| **Contexto** | No storage em memoria, `CartItem` era array embutido no objeto `Cart`. Para PostgreSQL, necessario normalizar. |
+| **Decisao** | Criar tabela `cart_items` com `cartId` como chave estrangeira para `carts.id`, com `ON DELETE CASCADE`. |
+| **Alternativas consideradas** | Manter JSONB embutido (descartado por falta de indexacao e consultas flexiveis). |
+| **Consequencias** | Operacoes de leitura do carrinho agora usam `include` com `hasMany`. |
+
+### ADR-DM-003 — UUID como PK em vez de userId
+
+| Campo | Detalhe |
+|-------|---------|
+| **Status** | Concluida |
+| **Data** | 2026-06-17 |
+| **Contexto** | Modelo anterior usava `userId` como PK da tabela `carts`. |
+| **Decisao** | Usar UUID como PK (`carts.id`) e manter `userId` como UNIQUE. Isso desacopla o identificador interno do identificador de negocio. |
+| **Consequencias** | FK de `cart_items` referencia `carts.id` (UUID) em vez de `carts.userId`. |
