@@ -1,6 +1,7 @@
 const { Sequelize } = require('sequelize');
 const config = require('../config');
 const defineModels = require('../models/cart.model');
+const logger = require('../config/logger');
 
 let sequelize = null;
 let Cart = null;
@@ -21,10 +22,7 @@ if (config.databaseUrl) {
     Cart = models.Cart;
     CartItem = models.CartItem;
   } catch (err) {
-    console.warn(
-      'Database connection failed, falling back to in-memory storage:',
-      err.message,
-    );
+    logger.warn({ error: err.message }, 'Database connection failed, falling back to in-memory storage');
     sequelize = null;
   }
 }

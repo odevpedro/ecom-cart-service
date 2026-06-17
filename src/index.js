@@ -1,6 +1,14 @@
+const { runMigrations } = require('./database/migrate');
 const app = require('./app');
 const config = require('./config');
+const logger = require('./config/logger');
 
-app.listen(config.port, () => {
-  console.log(`Cart Service running on port ${config.port}`);
-});
+async function start() {
+  await runMigrations();
+
+  app.listen(config.port, () => {
+    logger.info({ port: config.port }, 'Cart Service started');
+  });
+}
+
+start();
