@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 const ERROR_CODES = {
   'Product not found': 'PRODUCT_NOT_FOUND',
   'User not found': 'USER_NOT_FOUND',
@@ -6,7 +8,7 @@ const ERROR_CODES = {
 };
 
 function errorHandler(err, req, res, _next) {
-  const requestId = req.requestId || uuid();
+  const requestId = req.requestId || crypto.randomUUID();
   const message = err.message || 'Internal server error';
   const code = ERROR_CODES[message] || 'INTERNAL_ERROR';
   const status = err.status || (message.includes('not found') ? 404 : 400);
