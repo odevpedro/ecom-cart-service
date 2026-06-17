@@ -1,3 +1,4 @@
+const { DataTypes } = require('sequelize');
 const { sequelize } = require('./index');
 
 async function runMigrations() {
@@ -14,36 +15,36 @@ async function runMigrations() {
     if (!tables.find((t) => t.table_name === 'carts')) {
       await queryInterface.createTable('carts', {
         id: {
-          type: 'UUID',
+          type: DataTypes.UUID,
           defaultValue: sequelize.literal('gen_random_uuid()'),
           primaryKey: true,
         },
-        userId: { type: 'STRING', unique: true, allowNull: false },
-        totalCents: { type: 'INTEGER', defaultValue: 0 },
-        createdAt: { type: 'DATE', allowNull: false },
-        updatedAt: { type: 'DATE', allowNull: false },
+        userId: { type: DataTypes.STRING, unique: true, allowNull: false },
+        totalCents: { type: DataTypes.INTEGER, defaultValue: 0 },
+        createdAt: { type: DataTypes.DATE, allowNull: false },
+        updatedAt: { type: DataTypes.DATE, allowNull: false },
       });
 
       await queryInterface.createTable('cart_items', {
         id: {
-          type: 'UUID',
+          type: DataTypes.UUID,
           defaultValue: sequelize.literal('gen_random_uuid()'),
           primaryKey: true,
         },
         cartId: {
-          type: 'UUID',
+          type: DataTypes.UUID,
           allowNull: false,
           references: { model: 'carts', key: 'id' },
           onDelete: 'CASCADE',
         },
-        productId: { type: 'STRING', allowNull: false },
-        sku: { type: 'STRING' },
-        name: { type: 'STRING' },
-        unitPriceCents: { type: 'INTEGER' },
-        quantity: { type: 'INTEGER', defaultValue: 1 },
-        imageUrl: { type: 'STRING' },
-        createdAt: { type: 'DATE', allowNull: false },
-        updatedAt: { type: 'DATE', allowNull: false },
+        productId: { type: DataTypes.STRING, allowNull: false },
+        sku: { type: DataTypes.STRING },
+        name: { type: DataTypes.STRING },
+        unitPriceCents: { type: DataTypes.INTEGER },
+        quantity: { type: DataTypes.INTEGER, defaultValue: 1 },
+        imageUrl: { type: DataTypes.STRING },
+        createdAt: { type: DataTypes.DATE, allowNull: false },
+        updatedAt: { type: DataTypes.DATE, allowNull: false },
       });
     }
   } catch (err) {

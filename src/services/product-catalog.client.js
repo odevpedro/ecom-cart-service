@@ -2,15 +2,15 @@ const axios = require('axios');
 const config = require('../config');
 
 class ProductCatalogClient {
-  async getProduct(sku) {
+  async getProduct(idOrSku) {
     try {
       const { data } = await axios.get(
-        `${config.productCatalogUrl}/api/products`,
-        { params: { sku }, timeout: 5000 },
+        `${config.productCatalogUrl}/api/products/${idOrSku}`,
+        { timeout: 5000 },
       );
 
-      if (Array.isArray(data)) {
-        return data.find((p) => p.sku === sku) || null;
+      if (data && data.id) {
+        return data;
       }
       return null;
     } catch {
