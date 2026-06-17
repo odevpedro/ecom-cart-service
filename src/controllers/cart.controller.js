@@ -1,20 +1,28 @@
 const CartService = require('../services/cart.service');
 
+class AppError extends Error {
+  constructor(message, status = 400, code) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 class CartController {
   constructor() {
     this.cartService = new CartService();
   }
 
-  async getCart(req, res) {
+  async getCart(req, res, next) {
     try {
       const cart = await this.cartService.getCart(req.params.userId);
       res.json(cart);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      next(err);
     }
   }
 
-  async addItem(req, res) {
+  async addItem(req, res, next) {
     try {
       const cart = await this.cartService.addItem(req.params.userId, {
         productId: req.body.productId,
@@ -23,26 +31,31 @@ class CartController {
       });
       res.json(cart);
     } catch (err) {
-      const status = err.message === 'Product not found' || err.message === 'User not found' ? 404 : 400;
-      res.status(status).json({ error: err.message });
+      if (err.message === 'Product not found') {
+        next(new AppError(err.message, 404, 'PRODUCT_NOT_FOUND'));
+      } else if (err.message === 'User not found') {
+        next(new AppError(err.message, 404, 'USER_NOT_FOUND'));
+      } else {
+        next(err);
+      }
     }
   }
 
-  async removeItem(req, res) {
+  async removeItem(req, res, next) {
     try {
       const cart = await this.cartService.removeItem(req.params.userId, req.params.productId);
       res.json(cart);
     } catch (err) {
-      res.status(404).json({ error: err.message });
+      next(new AppError(err.message, 404, 'CART_NOT_FOUND'));
     }
   }
 
-  async clearCart(req, res) {
+  async clearCart(req, res, next) {
     try {
       const cart = await this.cartService.clearCart(req.params.userId);
       res.json(cart);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      next(err);
     }
   }
 }
